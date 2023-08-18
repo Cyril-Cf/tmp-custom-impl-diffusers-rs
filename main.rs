@@ -60,6 +60,7 @@ use clap::Parser;
 use diffusers::pipelines::stable_diffusion;
 use diffusers::transformers::clip;
 use tch::{nn::Module, Device, Kind, Tensor};
+use std::time::Instant;
 use std::fs;
 use std::path::Path;
 use chrono::{Utc, Datelike, Timelike};
@@ -287,6 +288,7 @@ fn run(args: Args) -> anyhow::Result<()> {
     }
 
     let bsize = 1;
+    let total_start_time = Instant::now();
     for idx in 0..num_samples {
         tch::manual_seed(seed + idx);
         let mut latents = Tensor::randn(
@@ -298,7 +300,7 @@ fn run(args: Args) -> anyhow::Result<()> {
         latents *= scheduler.init_noise_sigma();
 
         for (timestep_index, &timestep) in scheduler.timesteps().iter().enumerate() {
-            println!("Timestep {timestep_index}/{n_steps}");
+            let step_start_time = Instant::now();
             let latent_model_input = Tensor::cat(&[&latents, &latents], 0);
 
             let latent_model_input = scheduler.scale_model_input(latent_model_input, timestep);
@@ -318,8 +320,10 @@ fn run(args: Args) -> anyhow::Result<()> {
                     output_filename(&final_image, idx + 1, num_samples, Some(timestep_index + 1));
                 tch::vision::image::save(&image, final_image)?;
             }
+            let step_duration = step_start_time.elapsed();
+            let step_seconds = step_duration.as_secs_f64();
+            println!("Timestep {}/{n_steps}: time taken for this step : {:.2}", timestep_index, step_seconds);
         }
-
         println!("Generating the final image for sample {}/{}.", idx + 1, num_samples);
         let latents = latents.to(vae_device);
         let image = vae.decode(&(&latents / 0.18215));
@@ -329,6 +333,9 @@ fn run(args: Args) -> anyhow::Result<()> {
         let final_path = full_path.join(final_image);
         tch::vision::image::save(&image, final_path)?;
     }
+    let total_duration = total_start_time.elapsed();
+    let total_seconds = total_duration.as_secs_f64();
+    println!("Total time taken for generating all samples: {:.2} seconds", total_seconds);
 
     drop(no_grad_guard);
     Ok(())
